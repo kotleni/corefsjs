@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VFS Browser Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #222; color: #ddd; }
+        .log { white-space: pre-wrap; margin-bottom: 5px; }
+        .success { color: #50fa7b; }
+        .error { color: #ff5555; }
+        .info { color: #8be9fd; }
+    </style>
+</head>
+<body>
+<h2>VFS Browser Test Output</h2>
+<div id="console"></div>
+
+<script type="module">
+    import { CoreVFS, InMemoryVFSDriver, IndexedDBVFSDriver } from '../src';
+
+    const output = document.getElementById('console');
+
+    function log(msg, type = 'info') {
+        const div = document.createElement('div');
+        div.className = `log ${type}`;
+        div.textContent = `> ${msg}`;
+        output.appendChild(div);
+        console.log(msg);
+    }
+
+    async function runTests() {
+        try {
+            log('Initializing VFS...', 'info');
+            const vfs = new CoreVFS();
+
+            window.vfs = vfs;
+
+            const memDriver = new InMemoryVFSDriver('MEM');
+            vfs.mount(memDriver, '/');
+
+            const idbDriver = new IndexedDBVFSDriver('test_db');
+            vfs.mount(idbDriver, '/home');
+
+            log('Creating files in Memory...', 'info');
+            await vfs.createFile('/temp.txt');
+            await vfs.writeFile('/temp.txt', new TextEncoder().encode('RAM Data'));
+            log('Read Memory: ' + new TextDecoder().decode(await vfs.readFile('/temp.txt')), 'success');
+
+            log('Creating persistent file in IndexedDB...', 'info');
+            await new Promise(r => setTimeout(r, 100));
+
+            await vfs.createFile('/home/notes.txt');
+            await vfs.writeFile('/home/notes.txt', new TextEncoder().encode('Persisted Data in Browser DB'));
+
+            const content = await vfs.readFile('/home/notes.txt');
+            log('Read IDB: ' + new TextDecoder().decode(content), 'success');
+
+            log('Listing /home directory:', 'info');
+            const list = await vfs.listDirectory('/home');
+            list.forEach(f => log(` - ${f.descriptor.name} (${f.descriptor.size} bytes)`, 'info'));
+
+        } catch (e) {
+            log(e.message, 'error');
+            console.error(e);
+        }
+    }
+
+    runTests();
+</script>
+</body>
+</html>

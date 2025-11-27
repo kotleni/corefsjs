@@ -1,0 +1,27 @@
+{
+  "name": "corefsjs",
+  "version": "1.0.0",
+  "description": "",
+  "main": "./dist/corefs.umd.cjs",
+  "module": "./dist/corefs.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/corefs.js",
+      "require": "./dist/corefs.umd.cjs"
+    }
+  },
+  "scripts": {
+    "build": "vite build",
+    "dev" : "vite"
+  },
+  "dependencies": {
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.3",
+    "vite": "^7.2.4",
+    "vite-plugin-dts": "^4.5.4"
+  },
+  "private": true
+}
