@@ -3,376 +3,584 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CoreFS Web Terminal</title>
+    <title>CoreFS File Manager</title>
     <style>
         :root {
-            --bg-color: #1e1e1e;
-            --text-color: #d4d4d4;
-            --prompt-color: #50fa7b;
-            --path-color: #8be9fd;
-            --cmd-color: #f1fa8c;
-            --error-color: #ff5555;
-            --dir-color: #8be9fd;
+            --bg-dark: #1e1e1e;
+            --bg-panel: #252526;
+            --bg-hover: #37373d;
+            --bg-select: #094771;
+            --text-main: #cccccc;
+            --text-dim: #999999;
+            --accent: #007fd4;
+            --border: #3e3e42;
+            --shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
 
+        * { box-sizing: border-box; user-select: none; }
+
         body {
-            margin: 0;
-            padding: 0;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-            font-size: 14px;
-            overflow: hidden;
+            margin: 0; padding: 0;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             height: 100vh;
             display: flex;
             flex-direction: column;
+            overflow: hidden;
         }
 
-        #terminal {
-            flex: 1;
-            padding: 20px;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .line {
-            display: flex;
-            margin-bottom: 2px;
-            line-height: 1.5;
-            white-space: pre-wrap;
-            word-break: break-all;
-        }
-
-        .prompt-segment { color: var(--prompt-color); font-weight: bold; margin-right: 5px; }
-        .path-segment { color: var(--path-color); margin-right: 5px; }
-        .command-text { color: var(--text-color); }
-        .output { color: #cccccc; margin-bottom: 10px; display: block; width: 100%; }
-
-        .error { color: var(--error-color); }
-        .dir { color: var(--dir-color); font-weight: bold; }
-
-        #input-line {
+        /* --- Header / Toolbar --- */
+        #toolbar {
+            height: 40px;
+            background-color: var(--bg-panel);
+            border-bottom: 1px solid var(--border);
             display: flex;
             align-items: center;
+            padding: 0 10px;
+            gap: 10px;
         }
 
-        #cmd-input {
+        button {
             background: transparent;
-            border: none;
-            color: var(--text-color);
-            font-family: inherit;
-            font-size: inherit;
+            border: 1px solid transparent;
+            color: var(--text-main);
+            padding: 5px 10px;
+            cursor: pointer;
+            border-radius: 3px;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        button:hover { background-color: var(--bg-hover); }
+        button:active { background-color: var(--accent); color: white; }
+
+        /* --- Breadcrumbs --- */
+        #address-bar {
             flex: 1;
-            outline: none;
-            caret-color: var(--prompt-color);
+            display: flex;
+            align-items: center;
+            background-color: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            height: 28px;
+            padding: 0 5px;
+            font-family: monospace;
+            color: var(--text-main);
+        }
+
+        .crumb {
+            padding: 2px 5px;
+            cursor: pointer;
+            color: var(--text-main);
+        }
+        .crumb:hover { background-color: var(--bg-hover); border-radius: 2px; }
+        .crumb-sep { color: var(--text-dim); }
+
+        /* --- Main Grid --- */
+        #file-view {
+            flex: 1;
+            padding: 10px;
+            overflow-y: auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            grid-auto-rows: 110px;
+            gap: 10px;
+            align-content: start;
+        }
+
+        .item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid transparent;
+            cursor: pointer;
+            text-align: center;
+            transition: background 0.1s;
+        }
+
+        .item:hover { background-color: var(--bg-hover); }
+        .item.selected { background-color: var(--bg-hover); border-color: var(--accent); }
+
+        .icon { width: 48px; height: 48px; margin-bottom: 8px; }
+
+        .name {
+            font-size: 13px;
+            word-break: break-all;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            line-height: 1.2;
+        }
+
+        /* --- SVG Icons --- */
+        .icon-folder { fill: #dcb67a; }
+        .icon-file { fill: #9da5b4; }
+
+        /* --- Context Menu --- */
+        #context-menu {
+            position: absolute;
+            display: none;
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
+            min-width: 150px;
+            z-index: 100;
+            padding: 4px 0;
+            border-radius: 4px;
+        }
+
+        .ctx-item {
+            padding: 6px 15px;
+            font-size: 13px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .ctx-item:hover { background-color: var(--accent); color: white; }
+        .ctx-sep { height: 1px; background: var(--border); margin: 4px 0; }
+
+        /* --- Toast / Status --- */
+        #toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--accent);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 4px;
+            box-shadow: var(--shadow);
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            z-index: 1000;
+        }
+
+        /* --- Drag Overlay --- */
+        #drop-zone {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 127, 212, 0.2);
+            border: 4px dashed var(--accent);
+            display: none;
+            pointer-events: none;
+            z-index: 50;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: white;
+            font-weight: bold;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
         }
     </style>
 </head>
 <body>
 
-<div id="terminal">
-    <div class="output" id="history"></div>
-    <div id="input-line">
-        <span class="prompt-segment">user@corefs</span>
-        <span class="path-segment" id="prompt-path">/</span>
-        <span style="margin-right: 8px;">$</span>
-        <input type="text" id="cmd-input" autocomplete="off" spellcheck="false" autofocus>
-    </div>
+<!-- SVG Definitions -->
+<svg style="display: none;">
+    <symbol id="folder-icon" viewBox="0 0 24 24">
+        <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/>
+    </symbol>
+    <symbol id="file-icon" viewBox="0 0 24 24">
+        <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+    </symbol>
+    <symbol id="up-icon" viewBox="0 0 24 24">
+        <path d="M12 8l-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z"/>
+    </symbol>
+</svg>
+
+<div id="toolbar">
+    <button onclick="fm.goUp()">
+        <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor"><path d="M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2.02 .02H3V4.97h18v14.05z"/><path d="M0 0h24v24H0z" fill="none"/></svg>
+        Up
+    </button>
+    <div id="address-bar"></div>
+    <button onclick="fm.refresh()">Refresh</button>
+    <button onclick="fm.createFolder()">New Folder</button>
+    <button onclick="document.getElementById('file-upload').click()">Upload File</button>
+    <button id="paste-btn" onclick="fm.paste()" style="display: none;">Paste</button>
 </div>
+
+<div id="file-view"></div>
+
+<!-- Context Menu -->
+<div id="context-menu">
+    <div class="ctx-item" id="ctx-open">Open</div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" id="ctx-copy">Copy</div>
+    <div class="ctx-item" id="ctx-cut">Cut</div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" id="ctx-rename">Rename</div>
+    <div class="ctx-item" id="ctx-delete">Delete</div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" id="ctx-download">Download</div>
+</div>
+
+<div id="toast"></div>
+<div id="drop-zone">Drop files to upload</div>
+<input type="file" id="file-upload" style="display:none" onchange="fm.handleUpload(this)">
 
 <script type="module">
     import { CoreVFS, InMemoryVFSDriver, IndexedDBVFSDriver } from '../src/index.ts';
 
-    // --- UTILS: Path Normalization for Relative Paths ---
-    // Browsers don't have node 'path' module, so we make a simple one
+    // --- Helpers ---
     const Path = {
         join: (base, ...parts) => {
             const allParts = base.split('/').concat(parts.join('/').split('/'));
             const result = [];
             for (const part of allParts) {
                 if (part === '' || part === '.') continue;
-                if (part === '..') {
-                    if (result.length > 0) result.pop();
-                } else {
-                    result.push(part);
-                }
+                if (part === '..') result.length > 0 && result.pop();
+                else result.push(part);
             }
             return '/' + result.join('/');
         },
-        resolve: (cwd, target) => {
-            if (target.startsWith('/')) return Path.join(target); // Absolute
-            return Path.join(cwd, target); // Relative
-        },
-        dirname: (path) => {
-            const parts = path.split('/').filter(p => p);
-            parts.pop();
-            return '/' + parts.join('/');
-        }
+        dirname: (p) => '/' + p.split('/').filter(Boolean).slice(0, -1).join('/')
     };
 
-    // --- SHELL LOGIC ---
-    class Shell {
-        constructor(vfs) {
-            this.vfs = vfs;
+    class FileManager {
+        constructor() {
+            this.vfs = null;
             this.cwd = '/';
-            this.historyElement = document.getElementById('history');
-            this.promptPathElement = document.getElementById('prompt-path');
+            this.clipboard = null; // { path: string, op: 'copy'|'cut' }
+            this.items = []; // Current directory items
+
+            // DOM Elements
+            this.view = document.getElementById('file-view');
+            this.addrBar = document.getElementById('address-bar');
+            this.ctxMenu = document.getElementById('context-menu');
+            this.ctxTarget = null; // Item right-clicked
+
+            this.initListeners();
         }
 
-        print(text, className = '') {
-            const div = document.createElement('div');
-            div.className = 'output ' + className;
-            div.textContent = text;
-            this.historyElement.appendChild(div);
-            this.scrollToBottom();
-        }
-
-        printHTML(html) {
-            const div = document.createElement('div');
-            div.className = 'output';
-            div.innerHTML = html;
-            this.historyElement.appendChild(div);
-            this.scrollToBottom();
-        }
-
-        scrollToBottom() {
-            const terminal = document.getElementById('terminal');
-            terminal.scrollTop = terminal.scrollHeight;
-        }
-
-        updatePrompt() {
-            this.promptPathElement.textContent = this.cwd;
-        }
-
-        async execute(input) {
-            const trimmed = input.trim();
-            if (!trimmed) return;
-
-            // Add command to history view
-            const cmdDiv = document.createElement('div');
-            cmdDiv.className = 'line';
-            cmdDiv.innerHTML = `<span class="prompt-segment">user@corefs</span><span class="path-segment">${this.cwd}</span> $ <span class="command-text">${trimmed}</span>`;
-            this.historyElement.appendChild(cmdDiv);
-
-            // Simple parser (splits by space, handles > redirection)
-            let [cmd, ...args] = trimmed.split(/\s+/);
-
-            // Handle redirection >
-            const redirectIndex = args.indexOf('>');
-            let redirectFile = null;
-            if (redirectIndex !== -1 && redirectIndex < args.length - 1) {
-                redirectFile = args[redirectIndex + 1];
-                args = args.slice(0, redirectIndex); // Remove > and filename from args
-            }
-
+        async init() {
             try {
-                if (this.commands[cmd]) {
-                    const output = await this.commands[cmd].call(this, args);
+                this.vfs = new CoreVFS();
+                window.vfs = this.vfs; // Debug access
 
-                    // If redirected, write output to file
-                    if (redirectFile && output) {
-                        const targetPath = Path.resolve(this.cwd, redirectFile);
-                        const parent = Path.dirname(targetPath);
-                        // Ensure file exists
-                        if (!await this.vfs.exists(targetPath)) {
-                            // Check parent exists
-                            if(!await this.vfs.exists(parent) && parent !== '/') {
-                                throw new Error(`Directory '${parent}' does not exist`);
-                            }
-                            await this.vfs.createFile(targetPath);
-                        }
-                        await this.vfs.writeFile(targetPath, new TextEncoder().encode(output));
-                    }
-                    // Otherwise print to screen
-                    else if (output) {
-                        this.print(output);
-                    }
-                } else {
-                    this.print(`Command not found: ${cmd}`, 'error');
-                }
+                // Mount Drivers
+                const ram = new InMemoryVFSDriver('RAM');
+                await this.vfs.mount(ram, '/');
+
+                const hdd = new IndexedDBVFSDriver('MyFiles');
+                // Artificial wait for IDB
+                await new Promise(r => setTimeout(r, 50));
+                await this.vfs.mount(hdd, '/home');
+
+                this.showToast('System Ready');
+                await this.navigate('/');
             } catch (e) {
-                this.print(e.message, 'error');
                 console.error(e);
+                this.showToast('Init Failed: ' + e.message, true);
             }
-
-            this.scrollToBottom();
         }
 
-        // --- COMMANDS ---
-        commands = {
-            help: async () => {
-                return `Available commands:
-  ls [path]       List directory contents
-  cd [path]       Change directory
-  pwd             Print working directory
-  cat [file]      Read file content
-  mkdir [path]    Create directory
-  rm [path]       Remove file or directory
-  touch [file]    Create empty file
-  echo [text]     Print text (supports > redirection)
-  mounts          Show active mount points`;
-            },
+        initListeners() {
+            // Context Menu Hide
+            document.addEventListener('click', () => {
+                this.ctxMenu.style.display = 'none';
+                this.ctxTarget = null;
+            });
 
-            ls: async (args) => {
-                const target = args[0] ? Path.resolve(this.cwd, args[0]) : this.cwd;
-
-                try {
-                    const files = await this.vfs.listDirectory(target);
-                    if (files.length === 0) return '(empty directory)';
-
-                    // Format output
-                    let html = files.map(f => {
-                        const isDir = f.descriptor.isDirectory;
-                        const name = f.descriptor.name + (isDir ? '/' : '');
-                        const size = f.descriptor.size.toString().padStart(6);
-                        const cls = isDir ? 'dir' : '';
-                        return `<span class="${cls}">${name.padEnd(20)}</span> <span style="color:#666">${size} B</span>`;
-                    }).join('\n');
-
-                    this.printHTML(html);
-                    return null; // Handled printing manually
-                } catch (e) {
-                    throw new Error(`Cannot list '${target}': ${e.message}`);
-                }
-            },
-
-            cd: async (args) => {
-                const target = args[0] ? Path.resolve(this.cwd, args[0]) : '/';
-                const exists = await this.vfs.exists(target);
-                if (!exists) throw new Error(`Directory not found: ${target}`);
-
-                const stat = await this.vfs.stat(target);
-                if (!stat.isDirectory) throw new Error(`Not a directory: ${target}`);
-
-                this.cwd = target;
-                this.updatePrompt();
-                return null;
-            },
-
-            pwd: async () => {
-                return this.cwd;
-            },
-
-            mkdir: async (args) => {
-                if (!args[0]) throw new Error('mkdir: missing operand');
-                const target = Path.resolve(this.cwd, args[0]);
-                await this.vfs.createDirectory(target);
-                return `Created directory '${target}'`;
-            },
-
-            touch: async (args) => {
-                if (!args[0]) throw new Error('touch: missing operand');
-                const target = Path.resolve(this.cwd, args[0]);
-                if (await this.vfs.exists(target)) {
-                    // In real linux this updates timestamp, here we just ignore
-                    return null;
-                }
-                await this.vfs.createFile(target);
-                return `Created file '${target}'`;
-            },
-
-            rm: async (args) => {
-                if (!args[0]) throw new Error('rm: missing operand');
-                const target = Path.resolve(this.cwd, args[0]);
-
-                const stat = await this.vfs.stat(target);
-                if (!stat) throw new Error(`No such file or directory: ${target}`);
-
-                if (stat.isDirectory) {
-                    // Simple rm doesn't support -r recursive yet unless we implement it
-                    const success = await this.vfs.removeDirectory(target);
-                    if (!success) throw new Error('Failed to remove directory (not empty?)');
-                } else {
-                    await this.vfs.removeFile(target);
-                }
-                return `Removed '${target}'`;
-            },
-
-            cat: async (args) => {
-                if (!args[0]) throw new Error('cat: missing operand');
-                const target = Path.resolve(this.cwd, args[0]);
-                const content = await this.vfs.readFile(target);
-                if (content === null) throw new Error(`File not found or is a directory: ${target}`);
-                return new TextDecoder().decode(content);
-            },
-
-            echo: async (args) => {
-                // simple join, doesn't handle quote stripping perfectly but works for basic test
-                return args.join(' ');
-            },
-
-            mounts: async () => {
-                // accessing private mounts array via a hack or assuming we added a getter
-                // For now, let's just print hardcoded info or add a getter to your class later
-                return "Root (/) -> Memory\n/home -> IndexedDB";
-            }
-        };
-    }
-
-    // --- INITIALIZATION ---
-    async function main() {
-        const history = document.getElementById('history');
-        const input = document.getElementById('cmd-input');
-
-        function sysLog(msg) {
-            const div = document.createElement('div');
-            div.style.color = '#666';
-            div.style.fontStyle = 'italic';
-            div.textContent = `[SYSTEM] ${msg}`;
-            history.appendChild(div);
-        }
-
-        try {
-            sysLog("Booting CoreVFS Kernel...");
-
-            const vfs = new CoreVFS();
-            window.vfs = vfs; // For debugging in browser console
-
-            // 1. Mount Root (RAM)
-            const memDriver = new InMemoryVFSDriver('RAMDisk');
-            await vfs.mount(memDriver, '/');
-            sysLog("Mounted RAMDisk at /");
-
-            // 2. Mount IDB (Persistent)
-            const idbDriver = new IndexedDBVFSDriver('CoreFS_HDD');
-            // Give IDB a moment to init (in real app, driver should have ready promise)
-            await new Promise(r => setTimeout(r, 50));
-            await vfs.mount(idbDriver, '/home');
-            sysLog("Mounted IndexedDB at /home");
-
-            // Ensure /home exists (if IDB was empty)
-            try { await vfs.createDirectory('/home'); } catch(e) {}
-
-            // Create some default files for fun
-            if (!await vfs.exists('/readme.txt')) {
-                await vfs.createFile('/readme.txt');
-                await vfs.writeFile('/readme.txt', new TextEncoder().encode("Welcome to CoreFS!\nTry commands: ls, cd, mkdir, echo..."));
-            }
-
-            sysLog("System Ready.");
-
-            const shell = new Shell(vfs);
-
-            // Event Listeners
-            input.addEventListener('keydown', async (e) => {
-                if (e.key === 'Enter') {
-                    const val = input.value;
-                    input.value = '';
-                    await shell.execute(val);
+            // Drag and Drop
+            document.body.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                document.getElementById('drop-zone').style.display = 'flex';
+            });
+            document.getElementById('drop-zone').addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                document.getElementById('drop-zone').style.display = 'none';
+            });
+            document.body.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                document.getElementById('drop-zone').style.display = 'none';
+                if (e.dataTransfer.files.length) {
+                    for(const file of e.dataTransfer.files) {
+                        await this.uploadFileObj(file);
+                    }
                 }
             });
 
-            // Focus anywhere to type
-            document.body.addEventListener('click', () => input.focus());
+            // Context Menu Actions
+            document.getElementById('ctx-open').onclick = () => {
+                if(this.ctxTarget) this.openItem(this.ctxTarget);
+            };
+            document.getElementById('ctx-delete').onclick = () => {
+                if(this.ctxTarget) this.deleteItem(this.ctxTarget);
+            };
+            document.getElementById('ctx-rename').onclick = () => {
+                if(this.ctxTarget) this.renameItem(this.ctxTarget);
+            };
+            document.getElementById('ctx-download').onclick = () => {
+                if(this.ctxTarget) this.downloadItem(this.ctxTarget);
+            };
+            document.getElementById('ctx-copy').onclick = () => {
+                if(this.ctxTarget) this.setClipboard(this.ctxTarget, 'copy');
+            };
+            document.getElementById('ctx-cut').onclick = () => {
+                if(this.ctxTarget) this.setClipboard(this.ctxTarget, 'cut');
+            };
+        }
 
-        } catch (e) {
-            sysLog("CRITICAL ERROR: " + e.message);
-            console.error(e);
+        async navigate(path) {
+            if(path.charAt(0) !== '/') {
+                this.cwd = '/' + path;
+            } else {
+                this.cwd = path;
+            }
+            await this.render();
+        }
+
+        async refresh() {
+            await this.render();
+        }
+
+        async goUp() {
+            if (this.cwd === '/') return;
+            await this.navigate(Path.dirname(this.cwd));
+        }
+
+        async render() {
+            this.view.innerHTML = '';
+            this.renderBreadcrumbs();
+
+            try {
+                this.items = await this.vfs.listDirectory(this.cwd);
+                console.log(this.cwd, this.items)
+
+                // Sort: Folders first, then Name
+                this.items.sort((a, b) => {
+                    if (a.descriptor.isDirectory !== b.descriptor.isDirectory) {
+                        return a.descriptor.isDirectory ? -1 : 1;
+                    }
+                    return a.descriptor.name.localeCompare(b.descriptor.name);
+                });
+
+                if (this.items.length === 0) {
+                    this.view.innerHTML = '<div style="grid-column: 1/-1; text-align:center; color:#666; padding-top:50px">Empty Directory</div>';
+                    return;
+                }
+
+                this.items.forEach(file => {
+                    const isDir = file.descriptor.isDirectory;
+                    const el = document.createElement('div');
+                    el.className = 'item';
+                    el.title = file.descriptor.name;
+                    el.innerHTML = `
+                        <svg class="icon ${isDir ? 'icon-folder' : 'icon-file'}">
+                            <use href="${isDir ? '#folder-icon' : '#file-icon'}"></use>
+                        </svg>
+                        <div class="name">${file.descriptor.name}</div>
+                    `;
+
+                    // Click Selection
+                    el.onclick = (e) => {
+                        e.stopPropagation();
+                        // this.selectItem(el); // Can impl multiselect later
+                    };
+
+                    // Double Click Open
+                    el.ondblclick = () => {
+                        if (isDir) this.navigate(file.descriptor.path);
+                    };
+
+                    // Context Menu
+                    el.oncontextmenu = (e) => {
+                        e.preventDefault();
+                        this.ctxTarget = file;
+                        this.showContextMenu(e.clientX, e.clientY, isDir);
+                    };
+
+                    this.view.appendChild(el);
+                });
+
+                // Background Context Menu (Create New etc)
+                this.view.oncontextmenu = (e) => {
+                    if (e.target === this.view) {
+                        e.preventDefault();
+                        this.ctxTarget = null; // Clicked on empty space
+                        // Could show "Paste" here
+                    }
+                }
+
+            } catch (e) {
+                console.error(e);
+                this.showToast('Error listing directory', true);
+            }
+        }
+
+        renderBreadcrumbs() {
+            this.addrBar.innerHTML = '';
+            const parts = this.cwd.split('/').filter(Boolean);
+
+            // Root
+            const rootSpan = document.createElement('span');
+            rootSpan.className = 'crumb';
+            rootSpan.textContent = '/';
+            rootSpan.onclick = () => this.navigate('/');
+            this.addrBar.appendChild(rootSpan);
+
+            let builtPath = '';
+            parts.forEach((part) => {
+                builtPath += '/' + part;
+                const sep = document.createElement('span');
+                sep.className = 'crumb-sep';
+                sep.textContent = ' / ';
+                this.addrBar.appendChild(sep);
+
+                const span = document.createElement('span');
+                span.className = 'crumb';
+                span.textContent = part;
+                const p = builtPath; // closure
+                span.onclick = () => this.navigate(p);
+                this.addrBar.appendChild(span);
+            });
+        }
+
+        showContextMenu(x, y, isDir) {
+            this.ctxMenu.style.display = 'block';
+            this.ctxMenu.style.left = x + 'px';
+            this.ctxMenu.style.top = y + 'px';
+
+            // Show/Hide irrelevant options
+            document.getElementById('ctx-open').style.display = isDir ? 'block' : 'none';
+            document.getElementById('ctx-download').style.display = isDir ? 'none' : 'block';
+        }
+
+        openItem(file) {
+            if (file.descriptor.isDirectory) {
+                this.navigate(file.descriptor.path);
+            } else {
+                this.showToast('Cannot open files yet (implement previewer)');
+            }
+        }
+
+        async createFolder() {
+            const name = prompt("Folder Name:");
+            if (!name) return;
+            const path = Path.join(this.cwd, name);
+            try {
+                await this.vfs.createDirectory(path);
+                this.refresh();
+            } catch (e) {
+                this.showToast(e.message, true);
+            }
+        }
+
+        async deleteItem(file) {
+            if(!confirm(`Delete ${file.descriptor.name}?`)) return;
+            try {
+                if (file.descriptor.isDirectory) {
+                    await this.vfs.removeDirectory(file.descriptor.path);
+                } else {
+                    await this.vfs.removeFile(file.descriptor.path);
+                }
+                this.refresh();
+                this.showToast("Deleted");
+            } catch(e) {
+                this.showToast("Delete failed: " + e.message, true);
+            }
+        }
+
+        async renameItem(file) {
+            const newName = prompt("Rename to:", file.descriptor.name);
+            if (!newName || newName === file.descriptor.name) return;
+
+            const newPath = Path.join(Path.dirname(file.descriptor.path), newName);
+            try {
+                await this.vfs.rename(file.descriptor.path, newPath);
+                this.refresh();
+            } catch (e) {
+                this.showToast(e.message, true);
+            }
+        }
+
+        async downloadItem(file) {
+            try {
+                const data = await this.vfs.readFile(file.descriptor.path);
+                const blob = new Blob([data], { type: 'application/octet-stream' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = file.descriptor.name;
+                a.click();
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                this.showToast("Download failed", true);
+            }
+        }
+
+        // --- Clipboard ---
+        setClipboard(file, op) {
+            this.clipboard = { path: file.descriptor.path, op: op };
+            document.getElementById('paste-btn').style.display = 'flex';
+            this.showToast(`${op === 'copy' ? 'Copied' : 'Cut'} to clipboard`);
+        }
+
+        async paste() {
+            if (!this.clipboard) return;
+
+            const fileName = this.clipboard.path.split('/').pop();
+            const destPath = Path.join(this.cwd, fileName);
+
+            try {
+                if (this.clipboard.op === 'copy') {
+                    await this.vfs.copy(this.clipboard.path, destPath);
+                } else {
+                    await this.vfs.rename(this.clipboard.path, destPath);
+                    this.clipboard = null;
+                    document.getElementById('paste-btn').style.display = 'none';
+                }
+                this.refresh();
+                this.showToast("Paste successful");
+            } catch (e) {
+                this.showToast("Paste failed: " + e.message, true);
+            }
+        }
+
+        // --- Upload ---
+        handleUpload(input) {
+            if (input.files.length > 0) {
+                this.uploadFileObj(input.files[0]);
+                input.value = ''; // reset
+            }
+        }
+
+        async uploadFileObj(file) {
+            const buf = await file.arrayBuffer();
+            const path = Path.join(this.cwd, file.name);
+            try {
+                if (!(await this.vfs.exists(path))) {
+                    await this.vfs.createFile(path);
+                }
+                await this.vfs.writeFile(path, new Uint8Array(buf));
+                this.showToast(`Uploaded ${file.name}`);
+                this.refresh();
+            } catch (e) {
+                this.showToast("Upload Error: " + e.message, true);
+            }
+        }
+
+        showToast(msg, isError = false) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.style.background = isError ? '#ff5555' : '#007fd4';
+            t.style.opacity = '1';
+            setTimeout(() => t.style.opacity = '0', 3000);
         }
     }
 
-    main();
+    const fm = new FileManager();
+    window.fm = fm;
+    fm.init();
 </script>
 
 </body>
