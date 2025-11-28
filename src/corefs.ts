@@ -91,7 +91,8 @@ export class CoreVFS {
     async listDirectory(path: string): Promise<VFile[]> {
         const { driver, relativePath, mountPath } = this.resolve(path);
         const files = await driver.listDirectory(relativePath);
-        return files.map(f => this.fixDescriptorPath(f, mountPath));
+        return files.map(f => this.fixDescriptorPath(f, mountPath))
+            .filter(f => f.descriptor.name !== '/');
     }
 
     async readFile(path: string): Promise<Uint8Array | null> {
