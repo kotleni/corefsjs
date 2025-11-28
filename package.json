@@ -1,7 +1,28 @@
 {
   "name": "corefsjs",
   "version": "1.0.0",
-  "description": "",
+  "description": "Virtual file system library for browsers",
+  "homepage": "https://github.com/kotleni/corefsjs#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kotleni/corefsjs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kotleni/corefsjs/issues",
+    "email": "yavarenikya@gmail.com"
+  },
+  "author": "kotleni",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "filesystem",
+    "storage",
+    "memory"
+  ],
   "main": "./dist/corefs.umd.cjs",
   "module": "./dist/corefs.js",
   "types": "./dist/index.d.ts",
@@ -13,7 +34,8 @@
   },
   "scripts": {
     "build": "vite build",
-    "dev" : "vite"
+    "dev" : "vite",
+    "prepublishOnly" : "vite build"
   },
   "dependencies": {
     "uuid": "^13.0.0"
@@ -23,5 +45,5 @@
     "vite": "^7.2.4",
     "vite-plugin-dts": "^4.5.4"
   },
-  "private": true
+  "private": false
 }
