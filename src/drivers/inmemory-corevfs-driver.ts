@@ -36,7 +36,6 @@ export class InMemoryVFSDriver implements CoreVFSDriver {
 
         this.fs.journal.descriptors.push(descriptor);
         this.content.set(path, new Uint8Array(0));
-        console.log(`[${this.name}] Created file ${path}`);
         return { descriptor };
     }
 
@@ -49,7 +48,6 @@ export class InMemoryVFSDriver implements CoreVFSDriver {
 
         this.fs.journal.descriptors.splice(index, 1);
         this.content.delete(path);
-        console.log(`[${this.name}] Removed file ${path}`);
         return { descriptor: desc };
     }
 
@@ -67,7 +65,6 @@ export class InMemoryVFSDriver implements CoreVFSDriver {
         };
 
         this.fs.journal.descriptors.push(descriptor);
-        console.log(`[${this.name}] Created directory ${path}`);
         return true;
     }
 
@@ -144,32 +141,57 @@ export class InMemoryVFSDriver implements CoreVFSDriver {
     }
 
     async rename(oldPath: string, newPath: string): Promise<boolean> {
-        const desc = this.findDescriptor(oldPath);
-        if (!desc || this.findDescriptor(newPath)) return false;
+        console.log(oldPath, newPath)
+        const rootDesc = this.findDescriptor(oldPath);
+        if (!rootDesc || this.findDescriptor(newPath)) return false;
 
-        desc.path = newPath;
-        desc.name = newPath.split('/').pop() || newPath;
-        desc.modifiedAt = Date.now();
+        const itemsToMove = this.fs.journal.descriptors.filter(d =>
+            d.path === oldPath || d.path.startsWith(oldPath + '/')
+        );
 
-        if (!desc.isDirectory) {
-            const data = this.content.get(oldPath);
-            if (data) {
-                this.content.set(newPath, data);
-                this.content.delete(oldPath);
+        for (const desc of itemsToMove) {
+            const suffix = desc.path.substring(oldPath.length);
+            const destPath = newPath + suffix;
+
+            const oldItemPath = desc.path;
+
+            desc.path = destPath;
+            desc.name = destPath.split('/').pop() || destPath;
+            desc.modifiedAt = Date.now();
+
+            if (!desc.isDirectory && this.content.has(oldItemPath)) {
+                const data = this.content.get(oldItemPath)!;
+                this.content.set(destPath, data);
+                this.content.delete(oldItemPath);
             }
         }
+
         return true;
     }
 
     async copy(srcPath: string, destPath: string): Promise<boolean> {
         const srcDesc = this.findDescriptor(srcPath);
-        if (!srcDesc || srcDesc.isDirectory) return false;
+        if (!srcDesc) return false;
 
-        const data = this.content.get(srcPath);
-        if (!data) return false;
+        if (srcDesc.isDirectory) {
+            await this.createDirectory(destPath);
+            const children = this.fs.journal.descriptors.filter(d => {
+                const parentPath = d.path.substring(0, d.path.lastIndexOf('/'));
+                return parentPath === srcPath;
+            });
 
-        await this.createFile(destPath);
-        return this.writeFile(destPath, new Uint8Array(data));
+            for (const child of children) {
+                await this.copy(child.path, destPath + '/' + child.name);
+            }
+            return true;
+        } else {
+            const data = this.content.get(srcPath);
+            if (!data) return false;
+
+            await this.createFile(destPath);
+            // Copy buffer
+            return this.writeFile(destPath, new Uint8Array(data));
+        }
     }
 
     async truncate(path: string, length: number): Promise<boolean> {

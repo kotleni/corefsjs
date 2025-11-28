@@ -46,6 +46,9 @@ export class CoreVFS {
             relativePath = '/';
         }
 
+        if(relativePath.length > 0 && !relativePath.startsWith('/'))
+            relativePath = '/' + relativePath;
+
         return {
             driver: mount.driver,
             relativePath,
