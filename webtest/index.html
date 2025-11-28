@@ -3,70 +3,377 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VFS Browser Test</title>
+    <title>CoreFS Web Terminal</title>
     <style>
-        body { font-family: monospace; padding: 20px; background: #222; color: #ddd; }
-        .log { white-space: pre-wrap; margin-bottom: 5px; }
-        .success { color: #50fa7b; }
-        .error { color: #ff5555; }
-        .info { color: #8be9fd; }
+        :root {
+            --bg-color: #1e1e1e;
+            --text-color: #d4d4d4;
+            --prompt-color: #50fa7b;
+            --path-color: #8be9fd;
+            --cmd-color: #f1fa8c;
+            --error-color: #ff5555;
+            --dir-color: #8be9fd;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 14px;
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #terminal {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .line {
+            display: flex;
+            margin-bottom: 2px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .prompt-segment { color: var(--prompt-color); font-weight: bold; margin-right: 5px; }
+        .path-segment { color: var(--path-color); margin-right: 5px; }
+        .command-text { color: var(--text-color); }
+        .output { color: #cccccc; margin-bottom: 10px; display: block; width: 100%; }
+
+        .error { color: var(--error-color); }
+        .dir { color: var(--dir-color); font-weight: bold; }
+
+        #input-line {
+            display: flex;
+            align-items: center;
+        }
+
+        #cmd-input {
+            background: transparent;
+            border: none;
+            color: var(--text-color);
+            font-family: inherit;
+            font-size: inherit;
+            flex: 1;
+            outline: none;
+            caret-color: var(--prompt-color);
+        }
     </style>
 </head>
 <body>
-<h2>VFS Browser Test Output</h2>
-<div id="console"></div>
+
+<div id="terminal">
+    <div class="output" id="history"></div>
+    <div id="input-line">
+        <span class="prompt-segment">user@corefs</span>
+        <span class="path-segment" id="prompt-path">/</span>
+        <span style="margin-right: 8px;">$</span>
+        <input type="text" id="cmd-input" autocomplete="off" spellcheck="false" autofocus>
+    </div>
+</div>
 
 <script type="module">
-    import { CoreVFS, InMemoryVFSDriver, IndexedDBVFSDriver } from '../src';
+    import { CoreVFS, InMemoryVFSDriver, IndexedDBVFSDriver } from '../src/index.ts';
 
-    const output = document.getElementById('console');
+    // --- UTILS: Path Normalization for Relative Paths ---
+    // Browsers don't have node 'path' module, so we make a simple one
+    const Path = {
+        join: (base, ...parts) => {
+            const allParts = base.split('/').concat(parts.join('/').split('/'));
+            const result = [];
+            for (const part of allParts) {
+                if (part === '' || part === '.') continue;
+                if (part === '..') {
+                    if (result.length > 0) result.pop();
+                } else {
+                    result.push(part);
+                }
+            }
+            return '/' + result.join('/');
+        },
+        resolve: (cwd, target) => {
+            if (target.startsWith('/')) return Path.join(target); // Absolute
+            return Path.join(cwd, target); // Relative
+        },
+        dirname: (path) => {
+            const parts = path.split('/').filter(p => p);
+            parts.pop();
+            return '/' + parts.join('/');
+        }
+    };
 
-    function log(msg, type = 'info') {
-        const div = document.createElement('div');
-        div.className = `log ${type}`;
-        div.textContent = `> ${msg}`;
-        output.appendChild(div);
-        console.log(msg);
+    // --- SHELL LOGIC ---
+    class Shell {
+        constructor(vfs) {
+            this.vfs = vfs;
+            this.cwd = '/';
+            this.historyElement = document.getElementById('history');
+            this.promptPathElement = document.getElementById('prompt-path');
+        }
+
+        print(text, className = '') {
+            const div = document.createElement('div');
+            div.className = 'output ' + className;
+            div.textContent = text;
+            this.historyElement.appendChild(div);
+            this.scrollToBottom();
+        }
+
+        printHTML(html) {
+            const div = document.createElement('div');
+            div.className = 'output';
+            div.innerHTML = html;
+            this.historyElement.appendChild(div);
+            this.scrollToBottom();
+        }
+
+        scrollToBottom() {
+            const terminal = document.getElementById('terminal');
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        updatePrompt() {
+            this.promptPathElement.textContent = this.cwd;
+        }
+
+        async execute(input) {
+            const trimmed = input.trim();
+            if (!trimmed) return;
+
+            // Add command to history view
+            const cmdDiv = document.createElement('div');
+            cmdDiv.className = 'line';
+            cmdDiv.innerHTML = `<span class="prompt-segment">user@corefs</span><span class="path-segment">${this.cwd}</span> $ <span class="command-text">${trimmed}</span>`;
+            this.historyElement.appendChild(cmdDiv);
+
+            // Simple parser (splits by space, handles > redirection)
+            let [cmd, ...args] = trimmed.split(/\s+/);
+
+            // Handle redirection >
+            const redirectIndex = args.indexOf('>');
+            let redirectFile = null;
+            if (redirectIndex !== -1 && redirectIndex < args.length - 1) {
+                redirectFile = args[redirectIndex + 1];
+                args = args.slice(0, redirectIndex); // Remove > and filename from args
+            }
+
+            try {
+                if (this.commands[cmd]) {
+                    const output = await this.commands[cmd].call(this, args);
+
+                    // If redirected, write output to file
+                    if (redirectFile && output) {
+                        const targetPath = Path.resolve(this.cwd, redirectFile);
+                        const parent = Path.dirname(targetPath);
+                        // Ensure file exists
+                        if (!await this.vfs.exists(targetPath)) {
+                            // Check parent exists
+                            if(!await this.vfs.exists(parent) && parent !== '/') {
+                                throw new Error(`Directory '${parent}' does not exist`);
+                            }
+                            await this.vfs.createFile(targetPath);
+                        }
+                        await this.vfs.writeFile(targetPath, new TextEncoder().encode(output));
+                    }
+                    // Otherwise print to screen
+                    else if (output) {
+                        this.print(output);
+                    }
+                } else {
+                    this.print(`Command not found: ${cmd}`, 'error');
+                }
+            } catch (e) {
+                this.print(e.message, 'error');
+                console.error(e);
+            }
+
+            this.scrollToBottom();
+        }
+
+        // --- COMMANDS ---
+        commands = {
+            help: async () => {
+                return `Available commands:
+  ls [path]       List directory contents
+  cd [path]       Change directory
+  pwd             Print working directory
+  cat [file]      Read file content
+  mkdir [path]    Create directory
+  rm [path]       Remove file or directory
+  touch [file]    Create empty file
+  echo [text]     Print text (supports > redirection)
+  mounts          Show active mount points`;
+            },
+
+            ls: async (args) => {
+                const target = args[0] ? Path.resolve(this.cwd, args[0]) : this.cwd;
+
+                try {
+                    const files = await this.vfs.listDirectory(target);
+                    if (files.length === 0) return '(empty directory)';
+
+                    // Format output
+                    let html = files.map(f => {
+                        const isDir = f.descriptor.isDirectory;
+                        const name = f.descriptor.name + (isDir ? '/' : '');
+                        const size = f.descriptor.size.toString().padStart(6);
+                        const cls = isDir ? 'dir' : '';
+                        return `<span class="${cls}">${name.padEnd(20)}</span> <span style="color:#666">${size} B</span>`;
+                    }).join('\n');
+
+                    this.printHTML(html);
+                    return null; // Handled printing manually
+                } catch (e) {
+                    throw new Error(`Cannot list '${target}': ${e.message}`);
+                }
+            },
+
+            cd: async (args) => {
+                const target = args[0] ? Path.resolve(this.cwd, args[0]) : '/';
+                const exists = await this.vfs.exists(target);
+                if (!exists) throw new Error(`Directory not found: ${target}`);
+
+                const stat = await this.vfs.stat(target);
+                if (!stat.isDirectory) throw new Error(`Not a directory: ${target}`);
+
+                this.cwd = target;
+                this.updatePrompt();
+                return null;
+            },
+
+            pwd: async () => {
+                return this.cwd;
+            },
+
+            mkdir: async (args) => {
+                if (!args[0]) throw new Error('mkdir: missing operand');
+                const target = Path.resolve(this.cwd, args[0]);
+                await this.vfs.createDirectory(target);
+                return `Created directory '${target}'`;
+            },
+
+            touch: async (args) => {
+                if (!args[0]) throw new Error('touch: missing operand');
+                const target = Path.resolve(this.cwd, args[0]);
+                if (await this.vfs.exists(target)) {
+                    // In real linux this updates timestamp, here we just ignore
+                    return null;
+                }
+                await this.vfs.createFile(target);
+                return `Created file '${target}'`;
+            },
+
+            rm: async (args) => {
+                if (!args[0]) throw new Error('rm: missing operand');
+                const target = Path.resolve(this.cwd, args[0]);
+
+                const stat = await this.vfs.stat(target);
+                if (!stat) throw new Error(`No such file or directory: ${target}`);
+
+                if (stat.isDirectory) {
+                    // Simple rm doesn't support -r recursive yet unless we implement it
+                    const success = await this.vfs.removeDirectory(target);
+                    if (!success) throw new Error('Failed to remove directory (not empty?)');
+                } else {
+                    await this.vfs.removeFile(target);
+                }
+                return `Removed '${target}'`;
+            },
+
+            cat: async (args) => {
+                if (!args[0]) throw new Error('cat: missing operand');
+                const target = Path.resolve(this.cwd, args[0]);
+                const content = await this.vfs.readFile(target);
+                if (content === null) throw new Error(`File not found or is a directory: ${target}`);
+                return new TextDecoder().decode(content);
+            },
+
+            echo: async (args) => {
+                // simple join, doesn't handle quote stripping perfectly but works for basic test
+                return args.join(' ');
+            },
+
+            mounts: async () => {
+                // accessing private mounts array via a hack or assuming we added a getter
+                // For now, let's just print hardcoded info or add a getter to your class later
+                return "Root (/) -> Memory\n/home -> IndexedDB";
+            }
+        };
     }
 
-    async function runTests() {
+    // --- INITIALIZATION ---
+    async function main() {
+        const history = document.getElementById('history');
+        const input = document.getElementById('cmd-input');
+
+        function sysLog(msg) {
+            const div = document.createElement('div');
+            div.style.color = '#666';
+            div.style.fontStyle = 'italic';
+            div.textContent = `[SYSTEM] ${msg}`;
+            history.appendChild(div);
+        }
+
         try {
-            log('Initializing VFS...', 'info');
+            sysLog("Booting CoreVFS Kernel...");
+
             const vfs = new CoreVFS();
+            window.vfs = vfs; // For debugging in browser console
 
-            window.vfs = vfs;
+            // 1. Mount Root (RAM)
+            const memDriver = new InMemoryVFSDriver('RAMDisk');
+            await vfs.mount(memDriver, '/');
+            sysLog("Mounted RAMDisk at /");
 
-            const memDriver = new InMemoryVFSDriver('MEM');
-            vfs.mount(memDriver, '/');
+            // 2. Mount IDB (Persistent)
+            const idbDriver = new IndexedDBVFSDriver('CoreFS_HDD');
+            // Give IDB a moment to init (in real app, driver should have ready promise)
+            await new Promise(r => setTimeout(r, 50));
+            await vfs.mount(idbDriver, '/home');
+            sysLog("Mounted IndexedDB at /home");
 
-            const idbDriver = new IndexedDBVFSDriver('test_db');
-            vfs.mount(idbDriver, '/home');
+            // Ensure /home exists (if IDB was empty)
+            try { await vfs.createDirectory('/home'); } catch(e) {}
 
-            log('Creating files in Memory...', 'info');
-            await vfs.createFile('/temp.txt');
-            await vfs.writeFile('/temp.txt', new TextEncoder().encode('RAM Data'));
-            log('Read Memory: ' + new TextDecoder().decode(await vfs.readFile('/temp.txt')), 'success');
+            // Create some default files for fun
+            if (!await vfs.exists('/readme.txt')) {
+                await vfs.createFile('/readme.txt');
+                await vfs.writeFile('/readme.txt', new TextEncoder().encode("Welcome to CoreFS!\nTry commands: ls, cd, mkdir, echo..."));
+            }
 
-            log('Creating persistent file in IndexedDB...', 'info');
-            await new Promise(r => setTimeout(r, 100));
+            sysLog("System Ready.");
 
-            await vfs.createFile('/home/notes.txt');
-            await vfs.writeFile('/home/notes.txt', new TextEncoder().encode('Persisted Data in Browser DB'));
+            const shell = new Shell(vfs);
 
-            const content = await vfs.readFile('/home/notes.txt');
-            log('Read IDB: ' + new TextDecoder().decode(content), 'success');
+            // Event Listeners
+            input.addEventListener('keydown', async (e) => {
+                if (e.key === 'Enter') {
+                    const val = input.value;
+                    input.value = '';
+                    await shell.execute(val);
+                }
+            });
 
-            log('Listing /home directory:', 'info');
-            const list = await vfs.listDirectory('/home');
-            list.forEach(f => log(` - ${f.descriptor.name} (${f.descriptor.size} bytes)`, 'info'));
+            // Focus anywhere to type
+            document.body.addEventListener('click', () => input.focus());
 
         } catch (e) {
-            log(e.message, 'error');
+            sysLog("CRITICAL ERROR: " + e.message);
             console.error(e);
         }
     }
 
-    runTests();
+    main();
 </script>
+
 </body>
 </html>
